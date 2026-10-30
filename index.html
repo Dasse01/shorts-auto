@@ -101,12 +101,22 @@ ul{margin:0;padding-left:1.2em}
   <section class="card" id="c1">
     <div class="head"><span class="n">1</span><h2>키와 설정</h2></div>
     <div class="grid">
-      <div><label for="ko">OpenAI API 키</label><input type="password" id="ko" autocomplete="off" spellcheck="false"></div>
-      <div><label for="ky">YouTube Data API 키</label><input type="password" id="ky" autocomplete="off" spellcheck="false"></div>
+      <div><label for="ko">OpenAI API 키 (이미지)</label><input type="password" id="ko" autocomplete="off" spellcheck="false"></div>
+      <div><label for="ky">YouTube Data API 키 (참고 영상 검색)</label><input type="password" id="ky" autocomplete="off" spellcheck="false"></div>
+      <div><label for="kc">Claude(Anthropic) API 키 (대본)</label><input type="password" id="kc" autocomplete="off" spellcheck="false"></div>
+      <div><label for="ke">ElevenLabs API 키 (음성)</label><input type="password" id="ke" autocomplete="off" spellcheck="false"></div>
       <div><label for="channel">내 채널 주제</label><input type="text" id="channel" value="과학·공학 상식" autocomplete="off"></div>
     </div>
     <details><summary>모델과 연출 옵션</summary>
       <div class="grid" style="margin-top:10px">
+        <div><label for="engScript">대본 엔진</label><select id="engScript"><option value="claude">Claude (권장)</option><option value="openai">OpenAI</option></select></div>
+        <div><label for="mClaude">Claude 모델</label><input type="text" id="mClaude" value="claude-sonnet-5-5" autocomplete="off"></div>
+        <div><label for="engVoice">음성 엔진</label><select id="engVoice"><option value="eleven">ElevenLabs (권장)</option><option value="openai">OpenAI</option></select></div>
+        <div><label for="elModel">ElevenLabs 모델</label><select id="elModel"><option value="eleven_v4">Eleven v4</option><option value="eleven_multilingual_v2">Multilingual v2</option><option value="eleven_flash_v2_5">Flash v2.5</option></select></div>
+        <div style="grid-column:1/-1"><label for="elVoice">ElevenLabs 목소리</label><select id="elVoice"><option value="">← 키 입력 후 "목소리·모델 불러오기"</option></select>
+          <div class="row" style="margin-top:6px"><button class="s" id="elLoad" type="button">목소리·모델 불러오기</button><span id="elInfo" style="font-size:.85rem;color:var(--muted)"></span></div></div>
+        <div><label for="elStab">안정성(낮을수록 감정 변화↑) <span id="vStab">0.45</span></label><input type="range" id="elStab" min="0" max="1" step="0.05" value="0.45"></div>
+        <div><label for="elSpd">속도 <span id="vSpd">1.05</span></label><input type="range" id="elSpd" min="0.7" max="1.2" step="0.05" value="1.05"></div>
         <div><label for="mChat">대본 모델</label><input type="text" id="mChat" value="gpt-4o-mini" autocomplete="off"></div>
         <div><label for="mTts">음성 모델</label><input type="text" id="mTts" value="gpt-4o-mini-tts" autocomplete="off"></div>
         <div><label for="voice">목소리</label>
@@ -240,16 +250,16 @@ var S={videos:[],ref:null,analysis:null,topic:'',drafts:null,chosen:null,final:n
 /* ---------- keys ---------- */
 try{
   var kk=localStorage.getItem('shorts_studio_keys');
-  if(kk){var o=JSON.parse(kk);$('ko').value=o.o||'';$('ky').value=o.y||'';$('remember').checked=true}
+  if(kk){var o=JSON.parse(kk);$('ko').value=o.o||'';$('ky').value=o.y||'';$('kc').value=o.c||'';$('ke').value=o.e||'';$('remember').checked=true}
 }catch(e){}
 function saveKeys(){
   try{
-    if($('remember').checked)localStorage.setItem('shorts_studio_keys',JSON.stringify({o:$('ko').value.trim(),y:$('ky').value.trim()}));
+    if($('remember').checked)localStorage.setItem('shorts_studio_keys',JSON.stringify({o:$('ko').value.trim(),y:$('ky').value.trim(),c:$('kc').value.trim(),e:$('ke').value.trim()}));
     else localStorage.removeItem('shorts_studio_keys');
   }catch(e){}
 }
 $('remember').addEventListener('change',saveKeys);
-$('ko').addEventListener('change',saveKeys);$('ky').addEventListener('change',saveKeys);
+['ko','ky','kc','ke'].forEach(function(id){$(id).addEventListener('change',saveKeys)});
 
 /* ---------- api helpers ---------- */
 function netErr(e){
@@ -270,12 +280,93 @@ async function oa(path,body){
   }
   return r;
 }
+async function claudeFetch(path,body,method){
+  var k=$('kc').value.trim();
+  if(!k)throw new Error('1단계에 Claude(Anthropic) 키를 입력하세요.');
+  var r;
+  try{r=await fetch('https://api.anthropic.com'+path,{method:method||'POST',headers:{'x-api-key':k,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},body:body?JSON.stringify(body):undefined})}
+  catch(e){throw netErr(e)}
+  if(!r.ok){
+    var m='';try{var j=await r.json();m=(j.error&&j.error.message)||''}catch(e){}
+    if(r.status===401)m='Claude 키가 올바르지 않습니다. '+m;
+    if(r.status===404)m='Claude 모델 이름을 확인하세요(옵션의 Claude 모델). '+m;
+    if(r.status===429||r.status===529)m='요청이 많거나 한도 초과입니다. 잠시 후 다시 시도하세요. '+m;
+    throw new Error('Claude '+r.status+(m?': '+m:''));
+  }
+  return r;
+}
+function parseJSONText(t){
+  t=String(t||'').replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'');
+  try{return JSON.parse(t)}catch(e){}
+  var a=t.indexOf('{'),b=t.lastIndexOf('}');
+  if(a>=0&&b>a){try{return JSON.parse(t.slice(a,b+1))}catch(e){}}
+  throw new Error('AI 응답을 읽지 못했습니다. 다시 시도하세요.');
+}
 async function chatJSON(system,user){
+  if($('engScript').value==='claude'){
+    var rc=await claudeFetch('/v1/messages',{model:$('mClaude').value.trim()||'claude-sonnet-5-5',max_tokens:8000,system:system+' 반드시 JSON 객체 하나만 출력하고, 앞뒤에 설명이나 코드블록 표시를 붙이지 않습니다.',messages:[{role:'user',content:user}]});
+    var jc=await rc.json();
+    var tc=(jc.content||[]).map(function(x){return x.text||''}).join('');
+    return parseJSONText(tc);
+  }
   var r=await oa('/v1/chat/completions',{model:$('mChat').value.trim()||'gpt-4o-mini',response_format:{type:'json_object'},messages:[{role:'system',content:system},{role:'user',content:user}]});
   var j=await r.json();
-  var t=(j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||'';
-  t=t.replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'');
-  try{return JSON.parse(t)}catch(e){throw new Error('AI 응답을 읽지 못했습니다. 다시 시도하세요.')}
+  return parseJSONText((j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||'');
+}
+/* ---- ElevenLabs ---- */
+async function elFetch(path,opts){
+  opts=opts||{};var k=$('ke').value.trim();
+  if(!k)throw new Error('1단계에 ElevenLabs 키를 입력하세요.');
+  var r;
+  try{r=await fetch('https://api.elevenlabs.io'+path,{method:opts.method||'GET',headers:Object.assign({'xi-api-key':k},opts.headers||{}),body:opts.body})}
+  catch(e){throw netErr(e)}
+  if(!r.ok){
+    var d='';try{var j=await r.json();d=typeof j.detail==='string'?j.detail:JSON.stringify(j.detail||j)}catch(e){}
+    var m=r.status===401?'ElevenLabs 키가 올바르지 않거나 권한이 없습니다. ':(r.status===402||/quota|credit/i.test(d))?'ElevenLabs 크레딧이 부족합니다. ':r.status===429?'ElevenLabs 요청이 많습니다. 잠시 후 다시 시도하세요. ':'';
+    var e=new Error('ElevenLabs '+r.status+': '+m+d);e.status=r.status;throw e;
+  }
+  return r;
+}
+var EL_ORDER=['eleven_v4','eleven_v3','eleven_multilingual_v2','eleven_flash_v2_5','eleven_turbo_v2_5'];
+async function loadEleven(){
+  var info=$('elInfo');info.textContent='불러오는 중…';
+  try{
+    var rs=await Promise.all([elFetch('/v1/voices'),elFetch('/v1/models').catch(function(){return null})]);
+    var vj=await rs[0].json();
+    var vs=(vj.voices||[]).map(function(v){return {id:v.voice_id,name:v.name,mine:['cloned','generated'].indexOf(v.category)>=0,lib:['professional','famous','high_quality'].indexOf(v.category)>=0}});
+    vs.sort(function(a,b){return (b.mine-a.mine)||(b.lib-a.lib)||a.name.localeCompare(b.name)});
+    function opt(v){return '<option value="'+esc(v.id)+'">'+esc(v.name)+'</option>'}
+    var mine=vs.filter(function(v){return v.mine}),lib=vs.filter(function(v){return v.lib}),pre=vs.filter(function(v){return !v.mine&&!v.lib});
+    var prev=$('elVoice').value;
+    $('elVoice').innerHTML=(mine.length?'<optgroup label="내 목소리(복제)">'+mine.map(opt).join('')+'</optgroup>':'')+(lib.length?'<optgroup label="라이브러리에서 추가한 목소리">'+lib.map(opt).join('')+'</optgroup>':'')+(pre.length?'<optgroup label="기본 목소리">'+pre.map(opt).join('')+'</optgroup>':'');
+    if(prev&&Array.prototype.some.call($('elVoice').options,function(o){return o.value===prev}))$('elVoice').value=prev;
+    if(rs[1]){
+      var mj=await rs[1].json();
+      var ok=(mj||[]).filter(function(m){return m.can_do_text_to_speech!==false&&(!m.languages||m.languages.some(function(l){return /^ko/.test(l.language_id)}))&&m.model_id!=='eleven_v4_turbo'});
+      ok.sort(function(a,b){var ia=EL_ORDER.indexOf(a.model_id),ib=EL_ORDER.indexOf(b.model_id);return (ia<0?99:ia)-(ib<0?99:ib)});
+      if(ok.length){var pm=$('elModel').value;$('elModel').innerHTML=ok.map(function(m){return '<option value="'+esc(m.model_id)+'">'+esc(m.name||m.model_id)+'</option>'}).join('');if(ok.some(function(m){return m.model_id===pm}))$('elModel').value=pm}
+    }
+    info.textContent='목소리 '+vs.length+'개(내 목소리 '+mine.length+'개)';
+    if(!vs.length)info.textContent+=' · 사용할 수 있는 목소리가 없습니다. ElevenLabs에서 목소리를 추가하세요.';
+  }catch(e){info.textContent=e.message;throw e}
+}
+$('elLoad').addEventListener('click',function(){loadEleven().catch(function(){})});
+$('elStab').addEventListener('input',function(){$('vStab').textContent=Number($('elStab').value).toFixed(2)});
+$('elSpd').addEventListener('input',function(){$('vSpd').textContent=Number($('elSpd').value).toFixed(2)});
+async function elSpeak(text,prev,next){
+  if(!$('elVoice').value)await loadEleven();
+  var vid=$('elVoice').value;if(!vid)throw new Error('ElevenLabs 목소리를 선택하세요.');
+  function body(withCtx){
+    var b={text:text,model_id:$('elModel').value,voice_settings:{stability:Number($('elStab').value),similarity_boost:0.75,style:0.2,use_speaker_boost:true,speed:Number($('elSpd').value)}};
+    if(withCtx){if(prev)b.previous_text=prev;if(next)b.next_text=next}
+    return JSON.stringify(b);
+  }
+  var path='/v1/text-to-speech/'+encodeURIComponent(vid)+'?output_format=mp3_44100_128';
+  var hd={'Content-Type':'application/json','Accept':'audio/mpeg'};
+  var r;
+  try{r=await elFetch(path,{method:'POST',headers:hd,body:body(true)})}
+  catch(e){if(e.status===400||e.status===422)r=await elFetch(path,{method:'POST',headers:hd,body:body(false)});else throw e}
+  return await r.blob();
 }
 async function yt(path,params){
   var k=$('ky').value.trim();
@@ -311,6 +402,12 @@ $('bCheck').addEventListener('click',async function(){
         if(r.ok)msgs.push('OpenAI: 유효한 키입니다.');else{okAll=false;msgs.push('OpenAI: '+(r.status===401?'키가 올바르지 않습니다(401).':'확인하지 못했습니다('+r.status+').'))}
       }catch(e){okAll=false;msgs.push('OpenAI: 연결 실패')}
     }
+    var kc=$('kc').value.trim();
+    if(!kc){msgs.push('Claude: 키를 입력하세요.');okAll=$('engScript').value==='claude'?false:okAll}
+    else{try{await claudeFetch('/v1/models',null,'GET');msgs.push('Claude: 유효한 키입니다.')}catch(e){okAll=false;msgs.push('Claude: '+e.message)}}
+    var ke=$('ke').value.trim();
+    if(!ke){msgs.push('ElevenLabs: 키를 입력하세요.');okAll=$('engVoice').value==='eleven'?false:okAll}
+    else{try{await loadEleven();msgs.push('ElevenLabs: 유효한 키입니다. '+$('elInfo').textContent)}catch(e){okAll=false;msgs.push('ElevenLabs: '+e.message)}}
     var k2=$('ky').value.trim();
     if(!k2){msgs.push('YouTube: 키를 입력하세요.');okAll=false}
     else{
@@ -410,7 +507,7 @@ function pickRef(i){
 }
 
 /* ---------- 3: analyze ---------- */
-var SYS='당신은 한국어 유튜브 숏츠 전문 기획자입니다. 반드시 JSON 객체 하나만 출력합니다. 원본 영상의 문장을 그대로 베끼지 않고 구조와 심리 흐름만 활용합니다.';
+var SYS='당신은 한국어 유튜브 숏츠 전문 작가입니다. 반드시 JSON 객체 하나만 출력합니다. 원본 영상의 문장을 그대로 베끼지 않고 구조와 심리 흐름만 활용합니다. 대본은 실제 사람이 말하듯 생생한 구어체로 씁니다. 번역투와 AI 특유의 표현(예: ~라는 사실, 놀랍게도, 우리는 ~해야 합니다, 결론적으로)을 피하고, 구체적인 장면·숫자·고유한 디테일을 넣고, 짧은 문장과 긴 문장을 섞고, 첫 문장은 시청자가 멈추게 만드는 훅으로 시작합니다. 사실이 불확실한 내용은 단정하지 않습니다.';
 $('bAnalyze').addEventListener('click',async function(){
   var b=$('bAnalyze');busy(b,true,'분석 중…');hide('r3');
   try{
@@ -535,14 +632,20 @@ function trimBuf(buf){
     return out;
   }catch(e){return buf}
 }
+async function openaiSpeak(text){
+  var body={model:$('mTts').value.trim()||'gpt-4o-mini-tts',voice:$('voice').value,input:text,response_format:'mp3'};
+  if(/gpt-4o/.test(body.model))body.instructions=($('ttsInst').value.trim()||DEF_INST);
+  var r=await oa('/v1/audio/speech',body);return await r.blob();
+}
+async function ttsBlob(text,prev,next){
+  return $('engVoice').value==='eleven'?elSpeak(text,prev,next):openaiSpeak(text);
+}
 async function genTts(i){
   var s=S.scenes[i];s.aErr='';
   try{
     if(!s.narration.trim())throw new Error('대사가 비어 있습니다');
-    var body={model:$('mTts').value.trim()||'gpt-4o-mini-tts',voice:$('voice').value,input:s.narration,response_format:'mp3'};
-    if(/gpt-4o/.test(body.model))body.instructions=($('ttsInst').value.trim()||DEF_INST);
-    var r=await oa('/v1/audio/speech',body);
-    var blob=await r.blob();var ab=await blob.arrayBuffer();
+    var pv=S.scenes[i-1]?S.scenes[i-1].narration:'',nx=S.scenes[i+1]?S.scenes[i+1].narration:'';
+    var blob=await ttsBlob(s.narration,pv,nx);var ab=await blob.arrayBuffer();
     var buf=trimBuf(await ctx().decodeAudioData(ab.slice(0)));
     if(s.audio)URL.revokeObjectURL(s.audio.url);
     s.audio={blob:blob,url:URL.createObjectURL(blob)};s.buf=buf;s.dur=buf.duration;
@@ -556,9 +659,7 @@ function b64blob(b64,type){var bin=atob(b64),n=bin.length,u=new Uint8Array(n);fo
   $('bVoiceTest').addEventListener('click',async function(){
     var b=$('bVoiceTest'),m=$('voiceTestMsg');b.disabled=true;m.textContent='생성 중…';
     try{
-      var body={model:$('mTts').value.trim()||'gpt-4o-mini-tts',voice:$('voice').value,input:'서울대 의대 면접의 긴장된 순간이 찾아왔다. 하지만 마음은 답답하기만 하다.',response_format:'mp3'};
-      if(/gpt-4o/.test(body.model))body.instructions=($('ttsInst').value.trim()||DEF_INST);
-      var r=await oa('/v1/audio/speech',body);var bl=await r.blob();
+      var bl=await ttsBlob('서울대 의대 면접의 긴장된 순간이 찾아왔다. 하지만 마음은 답답하기만 하다.','','');
       var au=new Audio(URL.createObjectURL(bl));await au.play();m.textContent='재생 중';au.onended=function(){m.textContent=''};
     }catch(e){m.textContent=e.message}
     finally{b.disabled=false}
@@ -775,7 +876,7 @@ $('bRender').addEventListener('click',async function(){
     await wait(50);
     await waitIdle(b);
     var r=$(resId);
-    if(r&&r.classList.contains('bad'))throw new Error(label+' 실패: '+r.textContent);
+    if(r&&(r.classList.contains('bad')||(resId==='r1'&&r.classList.contains('warn'))))throw new Error(label+' 실패: '+r.textContent);
   }
   function waitIdle(b){return new Promise(function(res){var t=setInterval(function(){if(!b.disabled){clearInterval(t);res()}},300)})}
   btn.addEventListener('click',async function(){
