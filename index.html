@@ -50,6 +50,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 button{font:inherit;font-size:.88rem;padding:8px 14px;border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
 button.p{background:var(--accent);border-color:var(--accent);color:var(--accent-fg);font-weight:700}
 button.s{padding:5px 10px;font-size:.8rem}
+button.s{white-space:nowrap}
+tr.sel td{background:var(--accent-soft)}
+tr.sel button.s{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 button:disabled{opacity:.5;cursor:default}
 .res{font-size:.85rem;padding:7px 10px;border-radius:6px;display:none;white-space:pre-wrap}
 .res.ok{display:block;background:var(--ok-soft);color:var(--ok)}
@@ -389,6 +392,12 @@ function pickRef(i){
   var v=S.videos[i];S.ref=v;
   $('refInfo').textContent='제목: '+v.title+'\n채널: '+v.channel+'  (구독자 '+(v.subs==null?'비공개':fmt(v.subs))+')\n조회수: '+fmt(v.views)+'  좋아요: '+fmt(v.likes)+(v.ratio!=null?'  배율: '+v.ratio.toFixed(1)+'배':'')+'\n설명: '+(v.desc||'(없음)').slice(0,400);
   $('refBox').hidden=false;done('c2',true);
+  var tbb=$('tb');
+  Array.prototype.forEach.call(tbb.querySelectorAll('tr'),function(tr,k){
+    var on=(k===i);tr.classList.toggle('sel',on);
+    var bt=tr.querySelector('button');if(bt)bt.textContent=on?'선택됨 ✓':'참고로 선택';
+  });
+  try{$('refBox').scrollIntoView({behavior:'smooth',block:'center'})}catch(e){$('refBox').scrollIntoView()}
 }
 
 /* ---------- 3: analyze ---------- */
