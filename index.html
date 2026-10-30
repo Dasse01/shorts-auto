@@ -202,7 +202,7 @@ summary{transition:color .2s}summary:hover{color:var(--fg)}
       <div><label for="ky">YouTube Data API 키 (참고 영상 검색)</label><input type="password" id="ky" autocomplete="off" spellcheck="false"></div>
       <div><label for="kc">Claude(Anthropic) API 키 (대본)</label><input type="password" id="kc" autocomplete="off" spellcheck="false"></div>
       <div><label for="ke">ElevenLabs API 키 (음성)</label><input type="password" id="ke" autocomplete="off" spellcheck="false"></div>
-      <div><label for="channel">내 채널 주제</label><input type="text" id="channel" value="과학·공학 상식" autocomplete="off"></div>
+      <div><label for="channel">내 채널 주제</label><input type="text" id="channel" value="수시·정시·면접·학생부·입시 (수험생·학부모 대상 대입 정보)" autocomplete="off"></div>
     </div>
     <details><summary>모델과 연출 옵션</summary>
       <div class="grid" style="margin-top:10px">
@@ -247,7 +247,7 @@ summary{transition:color .2s}summary:hover{color:var(--fg)}
     <div class="grid">
       <div><label for="mode">검색 방식</label>
         <select id="mode"><option value="kw">키워드</option><option value="ch">채널 이름</option><option value="url">영상 주소</option></select></div>
-      <div><label for="q" id="qLabel">키워드</label><input type="text" id="q" placeholder="예: 뇌 과학" autocomplete="off"></div>
+      <div><label for="q" id="qLabel">키워드</label><input type="text" id="q" value="입시" placeholder="예: 수시 면접, 정시 전략, 학생부" autocomplete="off"></div>
       <div><label for="days">기간</label>
         <select id="days"><option value="30">최근 30일</option><option value="90" selected>최근 90일</option><option value="365">최근 1년</option><option value="0">전체</option></select></div>
       <div><label for="minV">최소 조회수</label><input type="number" id="minV" value="10000" min="0"></div>
@@ -539,7 +539,7 @@ $('bCheck').addEventListener('click',async function(){
 $('mode').addEventListener('change',function(){
   var m=$('mode').value;
   $('qLabel').textContent=m==='kw'?'키워드':m==='ch'?'채널 이름':'영상 주소';
-  $('q').placeholder=m==='kw'?'예: 뇌 과학':m==='ch'?'예: 채널 이름':'https://www.youtube.com/shorts/…';
+  $('q').placeholder=m==='kw'?'예: 수시 면접, 정시 전략, 학생부':m==='ch'?'예: 채널 이름':'https://www.youtube.com/shorts/…';
 });
 function videoId(u){
   var m=u.match(/(?:shorts\/|v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);return m?m[1]:(/^[A-Za-z0-9_-]{11}$/.test(u)?u:null);
@@ -651,7 +651,7 @@ function pickRef(i){
 }
 
 /* ---------- 3: analyze ---------- */
-var SYS='당신은 한국어 유튜브 숏츠 전문 작가입니다. 반드시 JSON 객체 하나만 출력합니다. 원본 영상의 문장을 그대로 베끼지 않고 구조와 심리 흐름만 활용합니다. 대본은 실제 사람이 말하듯 생생한 구어체로 씁니다. 번역투와 AI 특유의 표현(예: ~라는 사실, 놀랍게도, 우리는 ~해야 합니다, 결론적으로)을 피하고, 구체적인 장면·숫자·고유한 디테일을 넣고, 짧은 문장과 긴 문장을 섞고, 첫 문장은 시청자가 멈추게 만드는 훅으로 시작합니다. 사실이 불확실한 내용은 단정하지 않습니다.';
+var SYS='당신은 한국어 유튜브 숏츠 전문 작가입니다. 반드시 JSON 객체 하나만 출력합니다. 원본 영상의 문장을 그대로 베끼지 않고 구조와 심리 흐름만 활용합니다. 대본은 실제 사람이 말하듯 생생한 구어체로 씁니다. 번역투와 AI 특유의 표현(예: ~라는 사실, 놀랍게도, 우리는 ~해야 합니다, 결론적으로)을 피하고, 구체적인 장면·숫자·고유한 디테일을 넣고, 짧은 문장과 긴 문장을 섞고, 첫 문장은 시청자가 멈추게 만드는 훅으로 시작합니다. 사실이 불확실한 내용은 단정하지 않습니다. 채널 주제가 대학 입시(수시·정시·면접·학생부)이면 시청자는 수험생과 학부모입니다: 모집 연도·전형·수치는 확실할 때만 쓰고 불확실하면 "최근 입시에서는"처럼 말하며, 특정 대학 합격·불합격이나 결과를 보장하는 표현과 공포 마케팅은 쓰지 않고, 학생부는 수험생이 스스로 읽고 준비하는 관점으로 말합니다.';
 $('bAnalyze').addEventListener('click',async function(){
   var b=$('bAnalyze');busy(b,true,'분석 중…');hide('r3');
   try{
@@ -1157,7 +1157,7 @@ $('dlPack').addEventListener('click',function(){
     if(running)return;running=true;btn.disabled=true;var old=btn.textContent;btn.textContent='자동 실행 중…';
     try{
       await step($('bCheck'),'r1','1/9 키 확인 중…');
-      if(!$('q').value.trim())$('q').value=$('channel').value.trim();
+      if(!$('q').value.trim())$('q').value='입시';
       $('mode').value==='kw'||($('mode').value='kw');
       await step($('bSearch'),'r2','2/9 참고 영상 검색 중…');
       if(!S.videos.length)throw new Error('검색 결과가 없습니다. 키워드를 바꿔 보세요.');
