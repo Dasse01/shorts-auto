@@ -154,11 +154,15 @@ ul{margin:0;padding-left:1.2em}
       <div><label for="days">기간</label>
         <select id="days"><option value="30">최근 30일</option><option value="90" selected>최근 90일</option><option value="365">최근 1년</option><option value="0">전체</option></select></div>
       <div><label for="minV">최소 조회수</label><input type="number" id="minV" value="10000" min="0"></div>
+      <div><label for="shortLen">영상 길이</label><select id="shortLen"><option value="60" selected>쇼츠만 (60초 이하)</option><option value="180">3분 이하 쇼츠</option><option value="0">길이 제한 없음</option></select></div>
+      <div><label for="maxSub">최대 구독자 (작은 채널만, 비우면 제한 없음)</label><input type="number" id="maxSub" min="0" placeholder="예: 100000"></div>
+      <div><label for="pages">검색 깊이</label><select id="pages"><option value="1">50개 (빠름)</option><option value="2" selected>100개</option><option value="3">150개 (할당량 더 사용)</option></select></div>
+      <div><label for="sortBy">정렬</label><select id="sortBy"><option value="ratio">구독자 대비 조회수(배율)</option><option value="perday">하루 평균 조회수</option><option value="views">조회수</option><option value="recent">최신순</option></select></div>
     </div>
     <div class="row"><button class="p" id="bSearch">검색</button></div>
     <div class="res" id="r2"></div>
     <div class="tbl" id="tblWrap" hidden>
-      <table><thead><tr><th></th><th>제목</th><th>채널</th><th>구독자</th><th>조회수</th><th>배율</th><th>업로드</th><th></th></tr></thead><tbody id="tb"></tbody></table>
+      <table><thead><tr><th></th><th>제목</th><th>채널</th><th>구독자</th><th>조회수</th><th>일평균</th><th>배율</th><th>길이</th><th>업로드</th><th></th></tr></thead><tbody id="tb"></tbody></table>
     </div>
     <div id="refBox" hidden>
       <h3>선택한 참고 영상</h3>
@@ -443,7 +447,8 @@ async function hydrate(ids){
   }
   return out.map(function(v){
     var views=Number(v.statistics.viewCount||0),sub=subs[v.snippet.channelId];
-    return {id:v.id,title:v.snippet.title,desc:v.snippet.description||'',channel:v.snippet.channelTitle,channelId:v.snippet.channelId,
+    var dm=((v.contentDetails&&v.contentDetails.duration)||'').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)||[];var sec=(+dm[1]||0)*3600+(+dm[2]||0)*60+(+dm[3]||0);var age=Math.max(1,(Date.now()-new Date(v.snippet.publishedAt))/864e5);
+    return {id:v.id,sec:sec,perday:views/age,comments:Number(v.statistics.commentCount||0),tags:(v.snippet.tags||[]).slice(0,15),title:v.snippet.title,desc:v.snippet.description||'',channel:v.snippet.channelTitle,channelId:v.snippet.channelId,
       thumb:(v.snippet.thumbnails&&(v.snippet.thumbnails.medium||v.snippet.thumbnails.default)||{}).url||'',
       views:views,likes:Number(v.statistics.likeCount||0),subs:sub,ratio:(sub!=null&&sub>0)?views/sub:(sub===0?views:null),published:v.snippet.publishedAt};
   });
@@ -458,27 +463,58 @@ $('bSearch').addEventListener('click',async function(){
       var id=videoId(q);if(!id)throw new Error('영상 주소에서 영상 번호를 찾지 못했습니다.');ids=[id];
     }else{
       var days=Number($('days').value),after=days>0?new Date(Date.now()-days*864e5).toISOString():'';
-      var params={part:'snippet',type:'video',videoDuration:'short',order:'viewCount',maxResults:50,publishedAfter:after,regionCode:'KR',relevanceLanguage:'ko'};
+      var params={part:'snippet',type:'video',order:'viewCount',maxResults:50,publishedAfter:after,regionCode:'KR',relevanceLanguage:'ko'};
+      var sl=Number($('shortLen').value);if(sl>0)params.videoDuration='short';
       if(mode==='kw')params.q=q;
       else{
         var cj=await yt('search',{part:'snippet',type:'channel',q:q,maxResults:1});
         if(!cj.items||!cj.items.length)throw new Error('채널을 찾지 못했습니다.');
         params.channelId=cj.items[0].id.channelId;
       }
-      var sj=await yt('search',params);
-      ids=(sj.items||[]).map(function(i){return i.id.videoId}).filter(Boolean);
+      var np=Number($('pages').value)||1,tok='';
+      for(var pg=0;pg<np;pg++){
+        if(tok)params.pageToken=tok;
+        var sj=await yt('search',params);
+        (sj.items||[]).forEach(function(i){if(i.id&&i.id.videoId&&ids.indexOf(i.id.videoId)<0)ids.push(i.id.videoId)});
+        tok=sj.nextPageToken;if(!tok)break;
+      }
     }
     if(!ids.length)throw new Error('조건에 맞는 영상이 없습니다. 기간을 늘려 보세요.');
     var list=await hydrate(ids);
     var minV=Number($('minV').value)||0;
-    if(mode!=='url')list=list.filter(function(v){return v.views>=minV});
-    list.sort(function(a,b){return (b.ratio==null?-1:b.ratio)-(a.ratio==null?-1:a.ratio)});
-    S.videos=list;renderTable();
-    show('r2','ok',list.length+'건을 찾았습니다. 배율이 높은 순서입니다.'+(mode!=='url'?'':''));
+    var total=list.length;
+    if(mode!=='url'){
+      var slen=Number($('shortLen').value),maxS=$('maxSub').value===''?null:Number($('maxSub').value);
+      list=list.filter(function(v){
+        if(v.views<minV)return false;
+        if(slen>0&&v.sec>slen)return false;
+        if(maxS!=null&&(v.subs==null||v.subs>maxS))return false;
+        return true;
+      });
+    }
+    S.videos=list;sortVideos();renderTable();
+    if(!list.length)show('r2','warn','검색된 '+total+'건이 모두 조건(길이·최소 조회수·최대 구독자)에서 걸러졌습니다. 조건을 완화해 보세요.');
+    else show('r2','ok',total+'건 중 '+list.length+'건이 조건에 맞습니다. 정렬: '+$('sortBy').selectedOptions[0].textContent);
     if(mode==='url'&&list[0])pickRef(0);
   }catch(e){show('r2','bad',e.message)}
   finally{busy(b,false)}
 });
+function sortVideos(){
+  var k=$('sortBy').value;
+  S.videos.sort(function(a,b){
+    if(k==='views')return b.views-a.views;
+    if(k==='perday')return b.perday-a.perday;
+    if(k==='recent')return new Date(b.published)-new Date(a.published);
+    return (b.ratio==null?-1:b.ratio)-(a.ratio==null?-1:a.ratio);
+  });
+}
+$('sortBy').addEventListener('change',function(){if(S.videos.length){sortVideos();renderTable();if(S.ref){var ix=S.videos.indexOf(S.ref);if(ix>=0)markSel(ix)}}});
+function markSel(i){
+  Array.prototype.forEach.call($('tb').querySelectorAll('tr'),function(tr,k){
+    var on=(k===i);tr.classList.toggle('sel',on);
+    var bt=tr.querySelector('button');if(bt)bt.textContent=on?'선택됨 ✓':'참고로 선택';
+  });
+}
 function renderTable(){
   var tb=$('tb');tb.innerHTML='';
   S.videos.forEach(function(v,i){
@@ -487,8 +523,8 @@ function renderTable(){
     tr.innerHTML='<td>'+(v.thumb?'<img alt="" src="'+esc(v.thumb)+'">':'')+'</td>'+
       '<td><a href="'+link+'" target="_blank" rel="noopener">'+esc(v.title)+'</a></td>'+
       '<td>'+esc(v.channel)+'</td><td class="num">'+(v.subs==null?'비공개':fmt(v.subs))+'</td>'+
-      '<td class="num">'+fmt(v.views)+'</td><td class="num ratio">'+(v.ratio==null?'-':(v.ratio>=10?v.ratio.toFixed(0):v.ratio.toFixed(1))+'배')+'</td>'+
-      '<td class="num">'+esc((v.published||'').slice(0,10))+'</td><td><button class="s" data-i="'+i+'">참고로 선택</button></td>';
+      '<td class="num">'+fmt(v.views)+'</td><td class="num">'+fmt(Math.round(v.perday))+'</td><td class="num ratio">'+(v.ratio==null?'-':(v.ratio>=10?v.ratio.toFixed(0):v.ratio.toFixed(1))+'배')+'</td>'+
+      '<td class="num">'+(v.sec<=60?'쇼츠':Math.floor(v.sec/60)+'분 '+(v.sec%60)+'초')+'</td><td class="num">'+esc((v.published||'').slice(0,10))+'</td><td><button class="s" data-i="'+i+'">참고로 선택</button></td>';
     tb.appendChild(tr);
   });
   $('tblWrap').hidden=false;
@@ -496,13 +532,9 @@ function renderTable(){
 }
 function pickRef(i){
   var v=S.videos[i];S.ref=v;
-  $('refInfo').textContent='제목: '+v.title+'\n채널: '+v.channel+'  (구독자 '+(v.subs==null?'비공개':fmt(v.subs))+')\n조회수: '+fmt(v.views)+'  좋아요: '+fmt(v.likes)+(v.ratio!=null?'  배율: '+v.ratio.toFixed(1)+'배':'')+'\n설명: '+(v.desc||'(없음)').slice(0,400);
+  $('refInfo').textContent='제목: '+v.title+'\n채널: '+v.channel+'  (구독자 '+(v.subs==null?'비공개':fmt(v.subs))+')\n길이: '+v.sec+'초  일평균 조회수: '+fmt(Math.round(v.perday))+'  댓글: '+fmt(v.comments)+'\n태그: '+((v.tags||[]).join(', ')||'(없음)')+'\n조회수: '+fmt(v.views)+'  좋아요: '+fmt(v.likes)+(v.ratio!=null?'  배율: '+v.ratio.toFixed(1)+'배':'')+'\n설명: '+(v.desc||'(없음)').slice(0,400);
   $('refBox').hidden=false;done('c2',true);
-  var tbb=$('tb');
-  Array.prototype.forEach.call(tbb.querySelectorAll('tr'),function(tr,k){
-    var on=(k===i);tr.classList.toggle('sel',on);
-    var bt=tr.querySelector('button');if(bt)bt.textContent=on?'선택됨 ✓':'참고로 선택';
-  });
+  markSel(i);
   try{$('refBox').scrollIntoView({behavior:'smooth',block:'center'})}catch(e){$('refBox').scrollIntoView()}
 }
 
