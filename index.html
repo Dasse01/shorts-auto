@@ -110,7 +110,9 @@ ul{margin:0;padding-left:1.2em}
         <div><label for="mChat">대본 모델</label><input type="text" id="mChat" value="gpt-4o-mini" autocomplete="off"></div>
         <div><label for="mTts">음성 모델</label><input type="text" id="mTts" value="gpt-4o-mini-tts" autocomplete="off"></div>
         <div><label for="voice">목소리</label>
-          <select id="voice"><option>alloy</option><option>ash</option><option>coral</option><option>echo</option><option>fable</option><option>nova</option><option>onyx</option><option>sage</option><option>shimmer</option></select></div>
+          <select id="voice"><option>marin</option><option>cedar</option><option>coral</option><option>nova</option><option>shimmer</option><option>sage</option><option>alloy</option><option>ash</option><option>echo</option><option>fable</option><option>onyx</option></select></div>
+        <div style="grid-column:1/-1"><label for="ttsInst">음성 연기 지시(gpt-4o 음성 모델 전용)</label><textarea id="ttsInst" rows="3"></textarea>
+          <div class="row" style="margin-top:6px"><button class="s" id="bVoiceTest" type="button">목소리 미리듣기</button><span id="voiceTestMsg" class="hint"></span></div></div>
         <div><label for="mImg">이미지 모델</label><input type="text" id="mImg" value="gpt-image-2.5-flare" autocomplete="off"></div>
         <div><label for="qImg">이미지 품질(gpt-image 계열)</label>
           <select id="qImg"><option value="low">low (저렴)</option><option value="medium">medium</option><option value="high">high</option></select></div>
@@ -511,21 +513,50 @@ function refreshScene(i){
 }
 var AC=null;
 function ctx(){if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();return AC}
+var DEF_INST='당신은 한국어 원어민 성우입니다. 친한 사람에게 흥미로운 이야기를 들려주듯 자연스럽고 또렷한 한국어 표준어 억양으로 읽습니다. 영어식 억양과 과장된 연기는 피하고, 문장 끝을 평평하게 끌지 말고 자연스럽게 내리며, 쉼표에서만 짧게 숨을 쉽니다. 속도는 보통보다 약간 빠르게, 감정은 내용에 맞게 절제해서 표현합니다.';
+function trimBuf(buf){
+  try{
+    var n=buf.length,sr=buf.sampleRate,ch=buf.numberOfChannels,th=0.012,a=0,b=n-1,i,c,d;
+    var data=[];for(c=0;c<ch;c++)data.push(buf.getChannelData(c));
+    function loud(k){for(var c2=0;c2<ch;c2++){if(Math.abs(data[c2][k])>th)return true}return false}
+    while(a<n&&!loud(a))a++;
+    while(b>a&&!loud(b))b--;
+    var pad=Math.round(sr*0.06);a=Math.max(0,a-pad);b=Math.min(n-1,b+pad);
+    var len=b-a+1;if(len<sr*0.2||len>=n-sr*0.02)return buf;
+    var out=ctx().createBuffer(ch,len,sr);
+    for(c=0;c<ch;c++){out.getChannelData(c).set(data[c].subarray(a,b+1))}
+    return out;
+  }catch(e){return buf}
+}
 async function genTts(i){
   var s=S.scenes[i];s.aErr='';
   try{
     if(!s.narration.trim())throw new Error('대사가 비어 있습니다');
     var body={model:$('mTts').value.trim()||'gpt-4o-mini-tts',voice:$('voice').value,input:s.narration,response_format:'mp3'};
-    if(/gpt-4o/.test(body.model))body.instructions='한국어 유튜브 숏츠 내레이터. 또렷하고 속도감 있게, 자연스러운 억양으로 읽습니다.';
+    if(/gpt-4o/.test(body.model))body.instructions=($('ttsInst').value.trim()||DEF_INST);
     var r=await oa('/v1/audio/speech',body);
     var blob=await r.blob();var ab=await blob.arrayBuffer();
-    var buf=await ctx().decodeAudioData(ab.slice(0));
+    var buf=trimBuf(await ctx().decodeAudioData(ab.slice(0)));
     if(s.audio)URL.revokeObjectURL(s.audio.url);
     s.audio={blob:blob,url:URL.createObjectURL(blob)};s.buf=buf;s.dur=buf.duration;
   }catch(e){s.aErr=e.message;s.audio=null;s.buf=null;s.dur=0;throw e}
   finally{refreshScene(i)}
 }
 function b64blob(b64,type){var bin=atob(b64),n=bin.length,u=new Uint8Array(n);for(var i=0;i<n;i++)u[i]=bin.charCodeAt(i);return new Blob([u],{type:type||'image/png'})}
+
+(function(){
+  $('ttsInst').value=DEF_INST;
+  $('bVoiceTest').addEventListener('click',async function(){
+    var b=$('bVoiceTest'),m=$('voiceTestMsg');b.disabled=true;m.textContent='생성 중…';
+    try{
+      var body={model:$('mTts').value.trim()||'gpt-4o-mini-tts',voice:$('voice').value,input:'서울대 의대 면접의 긴장된 순간이 찾아왔다. 하지만 마음은 답답하기만 하다.',response_format:'mp3'};
+      if(/gpt-4o/.test(body.model))body.instructions=($('ttsInst').value.trim()||DEF_INST);
+      var r=await oa('/v1/audio/speech',body);var bl=await r.blob();
+      var au=new Audio(URL.createObjectURL(bl));await au.play();m.textContent='재생 중';au.onended=function(){m.textContent=''};
+    }catch(e){m.textContent=e.message}
+    finally{b.disabled=false}
+  });
+})();
 var IMG_LIST=null;
 async function listImgModels(){
   if(IMG_LIST)return IMG_LIST;
