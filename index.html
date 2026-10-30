@@ -526,6 +526,16 @@ async function genTts(i){
   finally{refreshScene(i)}
 }
 function b64blob(b64,type){var bin=atob(b64),n=bin.length,u=new Uint8Array(n);for(var i=0;i<n;i++)u[i]=bin.charCodeAt(i);return new Blob([u],{type:type||'image/png'})}
+var IMG_LIST=null;
+async function listImgModels(){
+  if(IMG_LIST)return IMG_LIST;
+  var k=$('ko').value.trim();IMG_LIST=[];
+  try{
+    var r=await fetch('https://api.openai.com/v1/models',{headers:{'Authorization':'Bearer '+k}});
+    if(r.ok){var j=await r.json();IMG_LIST=(j.data||[]).map(function(m){return m.id}).filter(function(id){return /image|dall-e/i.test(id)&&!/(edit|mini-tts)/i.test(id)}).sort().reverse()}
+  }catch(e){}
+  return IMG_LIST;
+}
 async function genImg(i){
   var s=S.scenes[i];s.iErr='';
   try{
@@ -550,7 +560,22 @@ async function genImg(i){
       }
       if(r&&model!==first){$('mImg').value=model;S.imgModelNote='이미지 모델을 '+model+'(으)로 자동 전환했습니다.'}
     }
-    if(!r)throw lastErr||new Error('사용 가능한 이미지 모델을 찾지 못했습니다');
+    var tried=[];
+    if(!r){
+      var extra=(await listImgModels()).filter(function(m){return cands.indexOf(m)<0});
+      for(var xi=0;xi<extra.length&&!r;xi++){
+        var xm=extra[xi];tried.push(xm);
+        var xmodes=/^gpt-image|image/.test(xm)&&!/dall-e/.test(xm)?[{size:'1024x1536',quality:$('qImg').value},{size:'1024x1536'},{}]:[{size:'1024x1792',response_format:'b64_json'}];
+        for(var xj=0;xj<xmodes.length&&!r;xj++){
+          try{r=await oa('/v1/images/generations',Object.assign({model:xm,prompt:prompt,n:1},xmodes[xj]))}catch(e){lastErr=e}
+        }
+        if(r){$('mImg').value=xm;S.imgModelNote='이미지 모델을 '+xm+'(으)로 자동 전환했습니다.'}
+      }
+    }
+    if(!r){
+      var avail=await listImgModels();
+      throw new Error((lastErr?lastErr.message:'이미지 생성 실패')+' [시도: '+cands.concat(tried).join(', ')+'] [내 키의 이미지 모델 목록: '+(avail.length?avail.join(', '):'조회 결과 없음')+']');
+    }
     var j=await r.json();var d=j.data&&j.data[0];
     if(!d)throw new Error('이미지 응답이 비었습니다');
     var blob;
